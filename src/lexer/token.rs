@@ -1,6 +1,6 @@
 use core::fmt;
 
-use crate::token_type::TokenType;
+use super::token_type::TokenType;
 
 #[derive(Debug)]
 pub enum Object {

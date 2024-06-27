@@ -1,5 +1,6 @@
-use crate::{
-    error::LoxError,
+use crate::error::LoxError;
+
+use super::{
     token::{Object, Token},
     token_type::TokenType,
 };
