@@ -103,6 +103,8 @@ impl Scanner {
                         }
                         self.advance();
                     }
+                } else if self.is_match('*') {
+                    self.scan_comment()?;
                 } else {
                     self.add_token(TokenType::Slash);
                 }
@@ -129,6 +131,36 @@ impl Scanner {
         }
 
         Ok(())
+    }
+
+    fn scan_comment(&mut self) -> Result<(), LoxError> {
+        loop {
+            match self.peek() {
+                Some('*') if self.peek_next() == Some('/') => {
+                    self.advance();
+                    self.advance();
+                    return Ok(());
+                }
+                Some('/') if self.peek_next() == Some('*') => {
+                    self.advance();
+                    self.advance();
+                    self.scan_comment()?;
+                }
+                Some('\n') => {
+                    self.advance();
+                    self.line += 1;
+                }
+                Some(_) => {
+                    self.advance();
+                }
+                None => {
+                    return Err(LoxError::error(
+                        self.line,
+                        "Unterminated comment".to_string(),
+                    ))
+                }
+            }
+        }
     }
 
     fn identifier(&mut self) {
