@@ -28,12 +28,9 @@ impl Scanner {
         let mut had_error: Option<LoxError> = None;
         while !self.is_at_end() {
             self.start = self.current;
-            match self.scan_token() {
-                Ok(_) => {}
-                Err(e) => {
-                    e.report("".to_string());
-                    had_error = Some(e);
-                }
+            if let Err(e) = self.scan_token() {
+                e.report("".to_string());
+                had_error = Some(e);
             }
         }
 
@@ -44,10 +41,6 @@ impl Scanner {
         } else {
             Ok(&self.tokens)
         }
-    }
-
-    fn is_at_end(&self) -> bool {
-        self.current >= self.source.len()
     }
 
     fn scan_token(&mut self) -> Result<(), LoxError> {
@@ -63,77 +56,42 @@ impl Scanner {
             '+' => self.add_token(TokenType::Plus),
             ';' => self.add_token(TokenType::SemiColon),
             '*' => self.add_token(TokenType::Star),
-            '!' => {
-                let tok = if self.is_match('=') {
-                    TokenType::BangEqual
-                } else {
-                    TokenType::Bang
-                };
-                self.add_token(tok);
-            }
-            '=' => {
-                let tok = if self.is_match('=') {
-                    TokenType::Equals
-                } else {
-                    TokenType::Assign
-                };
-                self.add_token(tok);
-            }
-            '<' => {
-                let tok = if self.is_match('=') {
-                    TokenType::LessEqual
-                } else {
-                    TokenType::Less
-                };
-                self.add_token(tok);
-            }
-            '>' => {
-                let tok = if self.is_match('=') {
-                    TokenType::GreaterEqual
-                } else {
-                    TokenType::Greater
-                };
-                self.add_token(tok);
-            }
-            '/' => {
-                if self.is_match('/') {
-                    while let Some(ch) = self.peek() {
-                        if ch == '\n' {
-                            break;
-                        }
-                        self.advance();
-                    }
-                } else if self.is_match('*') {
-                    self.scan_comment()?;
-                } else {
-                    self.add_token(TokenType::Slash);
-                }
-            }
+            '!' => self.add_token_if_else('=', TokenType::BangEqual, TokenType::Bang),
+            '=' => self.add_token_if_else('=', TokenType::Equals, TokenType::Assign),
+            '<' => self.add_token_if_else('=', TokenType::LessEqual, TokenType::Less),
+            '>' => self.add_token_if_else('=', TokenType::GreaterEqual, TokenType::Greater),
+            '/' => self.handle_slash()?,
             ' ' | '\r' | '\t' => {}
-            '\n' => {
-                self.line += 1;
-            }
-            '"' => {
-                self.string()?;
-            }
-            '0'..='9' => {
-                self.number();
-            }
-            _ if c.is_ascii_alphanumeric() || c == '_' => {
-                self.identifier();
-            }
+            '\n' => self.line += 1,
+            '"' => self.scan_string()?,
+            '0'..='9' => self.scan_number(),
+            _ if c.is_ascii_alphanumeric() || c == '_' => self.scan_identifier(),
             _ => {
                 return Err(LoxError::error(
                     self.line,
                     "unexpected character".to_string(),
-                ));
+                ))
             }
         }
 
         Ok(())
     }
 
-    fn scan_comment(&mut self) -> Result<(), LoxError> {
+    fn handle_slash(&mut self) -> Result<(), LoxError> {
+        match self.peek() {
+            Some('/') => {
+                while !self.is_at_end() && self.peek() != Some('\n') {
+                    self.advance();
+                }
+            }
+            Some('*') => self.scan_comment_block()?,
+            _ => self.add_token(TokenType::Slash),
+        }
+
+        Ok(())
+    }
+
+    fn scan_comment_block(&mut self) -> Result<(), LoxError> {
         loop {
             match self.peek() {
                 Some('*') if self.peek_next() == Some('/') => {
@@ -144,7 +102,7 @@ impl Scanner {
                 Some('/') if self.peek_next() == Some('*') => {
                     self.advance();
                     self.advance();
-                    self.scan_comment()?;
+                    self.scan_comment_block()?;
                 }
                 Some('\n') => {
                     self.advance();
@@ -163,7 +121,7 @@ impl Scanner {
         }
     }
 
-    fn identifier(&mut self) {
+    fn scan_identifier(&mut self) {
         while Scanner::is_alpha_numeric(self.peek()) {
             self.advance();
         }
@@ -176,7 +134,7 @@ impl Scanner {
         }
     }
 
-    fn number(&mut self) {
+    fn scan_number(&mut self) {
         while Scanner::is_digit(self.peek()) {
             self.advance();
         }
@@ -193,31 +151,11 @@ impl Scanner {
         self.add_token_object(TokenType::Number, Some(Object::Num(num)));
     }
 
-    fn is_digit(ch: Option<char>) -> bool {
-        if let Some(ch) = ch {
-            ch.is_ascii_digit()
-        } else {
-            false
-        }
-    }
-
-    fn is_alpha_numeric(ch: Option<char>) -> bool {
-        if let Some(ch) = ch {
-            ch.is_ascii_alphanumeric()
-        } else {
-            false
-        }
-    }
-
-    fn string(&mut self) -> Result<(), LoxError> {
+    fn scan_string(&mut self) -> Result<(), LoxError> {
         while let Some(ch) = self.peek() {
             match ch {
-                '"' => {
-                    break;
-                }
-                '\n' => {
-                    self.line += 1;
-                }
+                '"' => break,
+                '\n' => self.line += 1,
                 _ => {}
             }
             self.advance();
@@ -241,7 +179,9 @@ impl Scanner {
         self.add_token_object(TokenType::String, Some(Object::Str(value)));
         Ok(())
     }
+}
 
+impl Scanner {
     fn advance(&mut self) -> char {
         let result = *self.source.get(self.current).unwrap();
         self.current += 1;
@@ -258,6 +198,14 @@ impl Scanner {
             .push(Token::new(t_type, lexeme, literal, self.line));
     }
 
+    fn add_token_if_else(&mut self, expected: char, t_type: TokenType, else_type: TokenType) {
+        if self.is_match(expected) {
+            self.add_token(t_type);
+        } else {
+            self.add_token(else_type);
+        }
+    }
+
     fn is_match(&mut self, expected: char) -> bool {
         match self.source.get(self.current) {
             Some(ch) if *ch == expected => {
@@ -266,6 +214,10 @@ impl Scanner {
             }
             _ => false,
         }
+    }
+
+    fn is_at_end(&self) -> bool {
+        self.current >= self.source.len()
     }
 
     fn peek(&self) -> Option<char> {
@@ -295,6 +247,24 @@ impl Scanner {
             "var" => Some(TokenType::Var),
             "while" => Some(TokenType::While),
             _ => None,
+        }
+    }
+}
+
+impl Scanner {
+    fn is_digit(ch: Option<char>) -> bool {
+        if let Some(ch) = ch {
+            ch.is_ascii_digit()
+        } else {
+            false
+        }
+    }
+
+    fn is_alpha_numeric(ch: Option<char>) -> bool {
+        if let Some(ch) = ch {
+            ch.is_ascii_alphanumeric()
+        } else {
+            false
         }
     }
 }

@@ -1,4 +1,5 @@
 pub mod error;
+pub mod expr;
 pub mod lexer;
 
 use std::{
